@@ -1,0 +1,2353 @@
+chart_repository: baas-charts
+chart_name: baas-reference-stack
+chart_version: 4.23.4
+rootDomain: live.backbaseservices.com
+installation: &currentInstallation ref   # yaml anchors &currentInstallation and &currentRuntime to re-use this information as env variable for any service
+runtime: &currentRuntime dev
+registry: &projectRegistry "318081258114.dkr.ecr.eu-central-1.amazonaws.com"
+sharedRegistry: &sharedRegistry "922314272001.dkr.ecr.eu-central-1.amazonaws.com"
+harborStable: &harborStable harbor.backbase.eu/stable
+
+enableSharedRegistry: true
+
+#s3 bucket
+s3SecretEngagementTemplateNotificationSecret: &s3SecretTemplate ref-{{ .Values.runtime }}-engagement-template-notification #on use
+
+# Portalless FE Apps Docker Images Tags
+retailUsPortallessBaseTag: &retailUsPortallessBaseTag "retail-usa_2022.05.2_1.47.1-rc-retail.0_develop_build-14"
+employeePortallessBaseTag: &employeePortallessBaseTag "employee_2022.05_0.0.0_develop_build-10"
+employeeEssentialsPortallessBaseTag: &employeeEssentialsPortallessBaseTag "employee-essentials_2022.05_0.0.0_develop_build-6"
+remoteConfigWebAppBaseTag: &remoteConfigWebAppBaseTag "2022.06"
+
+# Product versions
+ipsBaseTag: &ipsBaseTag "2022.06.6"
+cxsBaseTag: &cxsBaseTag "2022.06.6"
+dbsBaseTag: &dbsBaseTag "2022.06.6"
+identityBaseTag: &identityBaseTag "2022.06.6"
+ceBaseTag: &ceBaseTag "2022.06.6"
+webAuthenticationBaseTag: &webAuthenticationBaseTag "2022.06.6"
+s3StorageConnector: &s3StorageConnector "2022.06.6"
+engageProvisioner: &engageProvisioner "2022.06"
+engageDefaults: &engageDefaults "2022.06-0.2.0"
+
+# Product components deployed as custom services on BaaS (i.e. not in baas-reference-stack)
+commentsBaseTag: &commentsBaseTag "2022.06.6"
+paymentSynchronizerBaseTag: &paymentSynchronizerBaseTag "2022.06.6"
+payverisMockBaseTag: &payverisMockBaseTag "2022.06.6"
+payverisP2PIntegrationBaseTag: &payverisP2PIntegrationBaseTag "2022.06.6"
+transactionSigningMockBaseTag: &transactionSigningMockBaseTag "2022.06.6"
+
+# ModelBank - Identity version
+modelBankIdentityBaseTag: &modelBankIdentityBaseTag "2022.06.6.v1.9.0-19.2"
+
+# ModelBank - Custom jobs versions
+retailBootstrapBaseTag: &retailBootstrapBaseTag "2022.06.6-0.26.0-53.4"
+
+# ModelBank - Integration services versions
+accountIntegrationServiceBaseTag: &accountIntegrationServiceBaseTag "2022.06.6-0.23.0-19.3"
+accountStatementIntegrationServiceBaseTag: &accountStatementIntegrationServiceBaseTag "2022.06.6-0.18.0-18.5"
+arrangementIntegrationOriginationServiceBaseTag: &arrangementIntegrationOriginationServiceBaseTag "2022.06.6-0.13.0-20.1"
+arrangementIntegrationClosureServiceBaseTag: &arrangementIntegrationClosureServiceBaseTag "2022.06.6-0.5.0-6.1"
+arrangementPullIntegrationServiceBaseTag: &arrangementPullIntegrationServiceBaseTag "2022.06.6-0.18.0-23.1"
+billpayEnrolmentIntegrationServiceBaseTag: &billpayEnrolmentIntegrationServiceBaseTag "2022.06.6-0.11.0-17.1"
+cardPresentationServiceBaseTag: &cardPresentationServiceBaseTag "2022.06.6-0.19.0-19.1"
+centralCommunicationServiceBaseTag: &centralCommunicationServiceBaseTag "2022.06.6-0.18.0-19.1"
+customUserProfileManagerBaseTag: &customUserProfileManagerBaseTag "2022.06.6-0.11.0-20.4"
+eventListenerServiceBaseTag: &eventListenerServiceBaseTag "2022.06.6-0.19.0-19.1"
+legalEntityOutboundIntegrationServiceBaseTag: &legalEntityOutboundIntegrationServiceBaseTag "2022.06.6-0.15.0-15.2"
+loanIntegrationOutBoundServiceBaseTag: &loanIntegrationOutBoundServiceBaseTag "2022.04-0.1.0-2.3"
+paymentIntegrationServiceBaseTag: &paymentIntegrationServiceBaseTag "2022.06.6-0.23.0-32.4"
+payverisIntegrationServiceBaseTag: &payverisIntegrationServiceBaseTag "2022.06.6-0.9.0-14.1"
+placesPresentationServiceBaseTag: &placesPresentationServiceBaseTag "2022.06.6-1.17.0-17.1"
+sesEmailConnectorBaseTag: &sesEmailConnectorBaseTag "2022.06.6-0.9.0-16.1"
+stopChecksIntegrationServiceBaseTag: &stopChecksIntegrationServiceBaseTag "2022.06.6-0.17.0-18.1"
+transactionIntegrationCheckImagesBaseTag: &transactionIntegrationCheckImagesBaseTag "2022.06.6-0.15.0-15.1"
+transactionPullIntegrationBaseTag: &transactionPullIntegrationBaseTag  "2022.06.6-0.22.0-27.1"
+twilioSmsConnectorBaseTag: &twilioSmsConnectorBaseTag "2022.06.6-0.9.0-13.1"
+releaseProvisioningPackageVersion: &releaseProvisioningPackageVersion remote-config-11
+
+k8s:
+  replicaCount: 2
+  volumes:
+    - name: aws-rds-truststore
+      secret:
+        defaultMode: 420
+        secretName: aws-rds-truststore
+    - name: contrast-agent-volume
+      emptyDir: {}
+    - name: contrast-cache
+      emptyDir: {}
+    - name: contrast-configuration
+      secret:
+        defaultMode: 420
+        secretName: contrast-config
+  volumeMounts:
+    - mountPath: /truststore
+      name: aws-rds-truststore
+      readOnly: true
+    - name: contrast-agent-volume
+      mountPath: /mnt/agents
+    - name: contrast-cache
+      mountPath: /mnt/contrast-cache
+    - name: contrast-configuration
+      mountPath: "/mnt/contrast-configuration"
+      readOnly: true
+  initContainers:
+    - name: contrast-agent-downloader
+      image: busybox
+      securityContext:
+        runAsUser: 1337
+      command: ['wget', '-O', '/downloads/contrast.jar', 'https://search.maven.org/remotecontent?filepath=com/contrastsecurity/contrast-agent/3.10.0.25482/contrast-agent-3.10.0.25482.jar']
+      volumeMounts:
+        - name: contrast-agent-volume
+          mountPath: /downloads
+  javaOpts:
+    extra:
+    - -Dlogging.level.root=WARN
+    - -Dlogging.level.com.backbase=WARN
+    - -Dcontrast.agent.contrast_working_dir="/mnt/contrast-cache"
+    - -javaagent:/mnt/agents/contrast.jar -Dcontrast.config.path="/mnt/contrast-configuration/contrast-config"
+
+istio:
+  enabled: true
+  customVirtualServices:
+    employee-web:
+       hosts:
+         - "employee.dev.ref.live.backbaseservices.com"
+       routes:
+         - match:
+             - uri:
+                 prefix: /api
+           route:
+             - destination:
+                 host: ips-edge-edge
+                 port:
+                   number: 8080
+       destinationService: employee-web
+       destinationPort: 8080
+    employee-essentials-web:
+        hosts:
+          - "employee-essentials.dev.ref.live.backbaseservices.com"
+        routes:
+          - match:
+              - uri:
+                  prefix: /api
+            route:
+              - destination:
+                  host: ips-edge-edge
+                  port:
+                    number: 8080
+        destinationService: employee-essentials-web
+        destinationPort: 8080
+    remote-config-web-app:
+      hosts:
+        - "remote-config-web-app.dev.ref.live.backbaseservices.com"
+      routes:
+        - match:
+            - uri:
+                prefix: /api
+          route:
+            - destination:
+                host: ips-edge-edge
+                port:
+                  number: 8080
+      destinationService: remote-config-web-app
+  customHttpRoutes:
+    edge:
+      - name: contentservices
+        match:
+          - uri:
+              prefix: /contentservices # https://app.dev.ref.live.backbase.com/contentservices
+        rewrite:
+          uri: " "
+        route:
+          - destination:
+              host: contentservices
+              port:
+                number: 8080
+      - name: retail-us-web
+        match:
+          - uri:
+              prefix: /web
+        route:
+          - destination:
+              host: retail-us-web
+              port:
+                number: 8080
+      - name: edge
+        headers:
+          request:
+            set:
+              X-Forwarded-Proto: "https"
+        route:
+          - destination:
+              host: ips-edge-edge
+              port:
+                number: 8080
+      - route:
+          - destination:
+              host: BlackHoleCluster
+    identity:
+      - headers:
+          request:
+            set:
+              X-Forwarded-Proto: "https"
+        route:
+          - destination:
+              host: identity-backbaseidentity
+              port:
+                number: 8080
+      - match:
+          - uri:
+              prefix: /console
+          - uri:
+              prefix: /auth/realms/master
+          - uri:
+              prefix: /auth/admin
+          - uri:
+              prefix: /auth/realms/backbase/account
+        route:
+          - destination:
+              host: BlackHoleCluster
+      - route:
+          - destination:
+              host: BlackHoleCluster
+  authorizationPolicy:
+    enabled: true
+    edge:
+      - from:
+        - source:
+            remoteIpBlocks:
+            - 54.216.203.94
+        to:
+        - operation:
+            hosts: ["app.dev.ref.live.backbaseservices.com"]
+      - when:
+        - key: request.headers[X-PRDL-BAAS]
+          values: ["prdl-dev-d8fd6fee-4306-493a-808a-a9a69990ce00"]
+        to:
+        - operation:
+            hosts: ["app.dev.ref.live.backbaseservices.com"]
+    identity:
+      - from:
+        - source:
+            remoteIpBlocks:
+            - 54.216.203.94
+            - 18.198.226.194 # Cluster's egress IP
+        to:
+        - operation:
+            hosts: ["identity.dev.ref.live.backbaseservices.com"]
+      - when:
+        - key: request.headers[X-PRDL-BAAS]
+          values: ["prdl-dev-d8fd6fee-4306-493a-808a-a9a69990ce00"]
+        to:
+        - operation:
+            hosts: ["identity.dev.ref.live.backbaseservices.com"]
+    custom:
+      - to:
+        - operation:
+            hosts: ["employee.dev.ref.live.backbaseservices.com", "employee-essentials.dev.ref.live.backbaseservices.com", "remote-config-web-app.dev.ref.live.backbaseservices.com"]
+identity:
+  tag: *identityBaseTag
+  capabilities:
+    backbaseIdentity:
+      values:
+        liquibase:
+          enabled: true
+        replicaCount: 2
+        app:
+          image:
+            tag: *modelBankIdentityBaseTag
+            repository: modelbank-bb-identity
+            registry: *projectRegistry
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "backbaseIdentity"
+          "SPRING_LIQUIBASE_ENABLED": "true"
+          "KEYCLOAK_HOME_DIR": "/"
+          "keycloak.backbase.passcode.use-mas-validation": "true"
+          "keycloak.backbase.mobile-authentication.url": "http://mobile-authentication:8080"
+          "keycloak.backbase.web-authentication.url": "http://web-authentication:8080"
+          "keycloak.hostname.default.frontendUrl": "https://identity.dev.ref.live.backbaseservices.com/auth/"
+          "keycloak.backbase.content-service.url": "http://contentservices:8080"
+          "keycloak.backbase.communication.url": "http://central-communication-service:8080/service-api/v1/communications/batches"
+          "keycloak.backbase.token-exchange.impersonation.role-prefix": "impersonation-"
+          "keycloak.backbase.token-exchange.impersonation.group-prefix": "impersonation-"
+          "keycloak.backbase.authenticators.otp-authenticator.enabled": "true"
+          "keycloak.backbase.authenticators.otp-authenticator.communications-service-endpoint": "http://central-communication-service:8080/service-api/v1/communications/batches"
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.text.channel": "text"
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.text.from":
+            valueFrom:
+              secretKeyRef:
+                name: twilio-credential
+                key: fromNumber
+                optional: true
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.text.identity-attributes.mobileNumber": "1"
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.email.identity-attributes.email": "2"
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.email.channel": "email"
+          "keycloak.backbase.authenticators.otp-authenticator.otp-channels.email.from":
+            valueFrom:
+              configMapKeyRef:
+                name: email-env
+                key: fromAddress
+                optional: true
+          "quarkus.http.cors": "true"
+          "quarkus.http.cors.exposed.headers": "Location"
+          "quarkus.http.cors.origins": "https://app.dev.ref.live.backbaseservices.com,https://employee.dev.ref.live.backbaseservices.com,https://employee-essentials.dev.ref.live.backbaseservices.com,https://remote-config-web-app.dev.ref.live.backbaseservices.com"
+        javaOpts:
+          extra:
+            - "-Dkeycloak.backbase.event-listeners.audit.integrationServiceUrl=http://audit-service:8080"
+            - "-Dkeycloak.profile.feature.upload_scripts=enabled"
+            - "-Djboss.server.config.dir=/tmp/keycloak-export"
+            - "-Dkeycloak.migration.action=import"
+            - "-Dkeycloak.migration.strategy=IGNORE_EXISTING"
+    oidcTokenConverter:
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "oidcTokenConverter"
+          "BACKBASE_OIDCTOKENCONVERTER_FORCEJWKSVERIFICATIONGIVENMATCHINGCLAIMS": "true"
+          "BACKBASE_TOKENCONVERTER_CLAIMVALUEVALIDATION_CLAIMDENYENTRIES_0_CLAIMNAME": "acr"
+          "BACKBASE_TOKENCONVERTER_CLAIMVALUEVALIDATION_CLAIMDENYENTRIES_0_CLAIMVALUES": "bb:deny"
+          "BACKBASE_TOKENCONVERTER_CLAIMVALUEVALIDATION_ENABLED": "true"
+          "backbase.token-converter.verify-only-no-internal-token": "true"
+          "backbase.token-converter.verify-only-entries.claimName": "verify_only"
+          "backbase.token-converter.verify-only-entries.claimValue": "1"
+    deviceManagement:
+      enabled: true
+      values:
+        enabled: true
+        liquibase: true
+        app:
+          metadata:
+            public: "true"
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "deviceManagement"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+    fido:
+      values:
+        enabled: true
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "fido"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "backbase.fido.transactionTextLengthLimit": 500
+          "backbase.fido.passcodeKeyRotationEnabled": true
+          "backbase.fido.passcodeRegistrationExpiryOffsetDays": 90
+    identityIntegration:
+      enabled: true
+      values:
+        enabled: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "identityIntegration"
+          "identity.realmConfiguration.fallbackOptions.useTemporaryPassword": "false"
+    confirmation:
+      enabled: true
+      values:
+        enabled: true
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "confirmation"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+    webAuthentication:
+      enabled: true
+      values:
+        app:
+          image:
+            tag: *webAuthenticationBaseTag
+        enabled: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "webAuthentication"
+          "backbase.authenticators.validityPeriodSeconds": "300"
+          "backbase.authenticators.numberOfDigits": "6"
+          "backbase.authenticators.channels.sms": "true"
+          "backbase.authenticators.channels.email": "true"
+          "backbase.authenticators.channels.pushDevice": "true"
+          "backbase.contentservices.messagePriority": "7"
+          "backbase.contentservices.otpPlaceholder": "otp"
+          "backbase.contentservices.title.repositoryId": "portalRepository"
+          "backbase.contentservices.body.repositoryId": "portalRepository"
+          "backbase.contentservices.title.objectPath": "/identity/web-auth/web-auth-otp-title"
+          "backbase.contentservices.body.objectPath": "/identity/web-auth/web-auth-otp-body"
+          "backbase.pushnotification.pushToAppName": "model-bank"
+          "backbase.pushnotification.authCodePlaceHolder": "otp"
+          "backbase.pushnotification.pushPriority": "7"
+          "backbase.pushnotification.pushTitleConfig.objectPath": "/identity/push-notifications/web-auth-otp-title"
+          "backbase.pushnotification.pushTitleConfig.repositoryId": "portalRepository"
+          "backbase.pushnotification.pushBodyConfig.objectPath": "/identity/push-notifications/web-auth-otp-body"
+          "backbase.pushnotification.pushBodyConfig.repositoryId": "portalRepository"
+          "spring.cache.cache-names": "content"
+          "spring.cache.caffeine.spec": "maximumSize=500,expireAfterAccess=p1d"
+          "backbase.authenticators.otp.fromEmail":
+            valueFrom:
+              configMapKeyRef:
+                name: email-env
+                key: fromAddress
+          "backbase.authenticators.otp.fromSms":
+            valueFrom:
+              secretKeyRef:
+                name: twilio-credential
+                key: fromNumber
+    mobileAuthentication:
+      enabled: true
+      values:
+        enabled: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "mobileAuthentication"
+          "backbase.mobile-authentication.passcode.length": "5"
+          "backbase.mobile-authentication.passcode.max-allowed-consecutive-repeating-digits": "3"
+          "backbase.mobile-authentication.passcode.max-allowed-consecutive-sequential-digits": "3"
+    orchestration:
+      enabled: true
+      values:
+        enabled: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "orchestration"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_ENCRYPTION_KEY":
+            valueFrom:
+              secretKeyRef:
+                name: identity-orchestration
+                key: encryption-key
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_0_URLSTARTSWITH": "https://app.dev.ref.live.backbaseservices.com/web"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_0_REALM": "retail"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_0_CLIENT": "bb-web-client"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_1_URLSTARTSWITH": "https://employee.dev.ref.live.backbaseservices.com"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_1_REALM": "employee"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_1_CLIENT": "bb-web-client"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_EXPERIENCEMAPPING_1_CLIENTSECRET": "dont-care"
+          "BACKBASE_ORCHESTRATION_IMPERSONATION_TOKENEXCHANGE_URL": "http://identity-backbaseidentity:8080/auth/realms/{realm_name}/protocol/openid-connect/token"
+          "SSO_JWT_INTERNAL_SIGNATURE_KEY_TYPE": "ENV"
+          "SSO_JWT_INTERNAL_SIGNATURE_KEY_VALUE": "SIG_SECRET_KEY"
+          "SIG_SECRET_KEY":
+            valueFrom:
+              secretKeyRef:
+                name: jwt
+                key: jwt-internal-secretkey
+          "USERCTX_KEY":
+            valueFrom:
+              secretKeyRef:
+                name: jwt
+                key: userctx-key
+        additionalConfig: |
+          backbase:
+            security:
+              rules-enabled: true
+              deny-all: false
+              rules:
+                make-payment:
+                  to:
+                    - methods: "POST"
+                      paths: /client-api/payment-orders/*
+                  when:
+                    token: CLIENT
+                    match: NONE
+                    values: make_payment
+                view-payment:
+                  to:
+                    - methods: "GET"
+                      paths: /client-api/payment-orders/*
+                  when:
+                    token: CLIENT
+                    match: ANY
+                    values:
+                      - view_payments
+                      - view_payment
+ips:
+  enabled: true
+  tag: *ipsBaseTag
+  services:
+    edge:
+      values:
+        env:
+          "GATEWAY_ACTUATOR_USER": "admin"
+          "GATEWAY_ACTUATOR_PASSWORD": "admin"
+          "GATEWAY_CSRF_ENABLED": "true"
+          "spring.cloud.gateway.discovery.locator.include-expression": "true"
+          "spring.cloud.gateway.httpserver.wiretap": "true"
+          "spring.cloud.gateway.httpclient.wiretap": "true"
+          "gateway.response.cookies.definition.Authorization.attributes.SameSite.value": Strict
+          "gateway.response.cookies.definition.XSRF-TOKEN.attributes.SameSite.value": Strict
+          "gateway.response.cookies.definition.Authorization.attributes.Secure.value": "true"
+          "gateway.response.cookies.definition.XSRF-TOKEN.attributes.Secure.value": "true"
+          "gateway.response.cookies.definition.Authorization.attributes.httpOnly.value": "true"
+          "SPRING_APPLICATION_JSON": '{"gateway":{"csrf":{"enabled":true}},"spring":{"cloud":{"globalcors":{"corsConfigurations":{"[/**]":{"allowedOriginPatterns":"https://*.dev.ref.live.backbaseservices.com","exposedHeaders":"*","allowedHeaders":"*","allowedMethods":["GET","POST","OPTIONS","PUT","PATCH","DELETE"]}}}}}}'
+
+cxs:
+  enabled: true
+  tag: *cxsBaseTag
+  capabilities:
+    contentServices:
+      enabled: true
+      liquibase: true
+      app:
+        image:
+          tag: *cxsBaseTag
+      env:
+        "CONTRAST__SERVER__TAGS": "Developer Enablement"
+        "CONTRAST__SERVER__NAME": "contentServices"
+        "contentservices.whitelist.allowedContentTypes": "image/jpeg,image/pjpeg,image/gif,image/png,image/svg+xml,application/pdf,application/json,application/zip,application/rtf,text/plain,text/html,application/octet-stream,text/x-handlebars-template"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "spring.autoconfigure.exclude": ""
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "SPRING_LIQUIBASE_ENABLED": "false"
+        "spring.liquibase.enabled": "false"
+        "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+        "contentservices.storage.connectors.s3.service": "s3storageconnector"
+        "contentservices.storage.defaultImplementation": "DB"
+    provisioning:
+      enabled: true
+      liquibase: true
+      app:
+        image:
+          tag: *cxsBaseTag
+      env:
+        "CONTRAST__SERVER__TAGS": "Customer Engagement"
+        "CONTRAST__SERVER__NAME": "provisioning"
+        "SPRING_LIQUIBASE_ENABLED": "false"
+        "spring.liquibase.enabled": "false"
+    pushIntegrationService:
+      enabled: true
+      liquibase: true
+      app:
+        image:
+          tag: *cxsBaseTag
+      activemq: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Customer Engagement"
+        "CONTRAST__SERVER__NAME": "pushIntegrationService"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "backbase.mobile.tokenResolver.type": "device_management"
+        "backbase.mobile.tokenResolver.url": ""
+        "backbase.mobile.isProduction": "false"
+        "backbase.mobile.ios.topic": "com.backbase.modelbank.retailbankingapp.dev"
+        "backbase.mobile.ios.isFirebase": "true"
+        "spring.cloud.stream.default-binder": "activemq"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.group": "push-group"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.group": "push-group"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.group": "push-group"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.destination": "Backbase.communication.push-low-priority"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.destination": "Backbase.communication.push-medium-priority"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.destination": "Backbase.communication.push-high-priority"
+        "spring.cloud.stream.bindings.commTracking-out-0.destination": "Backbase.communication.messages-tracking"
+        "spring.cloud.stream.default.content-type": "application/json"
+        "spring.cloud.stream.function.definition": "commLowPriority;commMediumPriority;commHighPriority;commTracking"
+        "spring.cloud.stream.default.consumer.autoCommitOnError": "false"
+        "spring.cloud.stream.default.consumer.backOffInitialInterval": "2000"
+        "spring.cloud.stream.default.consumer.backOffMaxInterval": "6000"
+        "spring.cloud.stream.default.consumer.backOffMultiplier": "2.0"
+        "spring.cloud.stream.default.consumer.concurrency": "1"
+        "spring.cloud.stream.default.consumer.default-retryable": "true"
+        "spring.cloud.stream.default.consumer.exchangeDurable": "true"
+        "spring.cloud.stream.default.consumer.max-attempts": "5"
+        "spring.cloud.stream.default.consumer.prefetch": "1000"
+        "SPRING_LIQUIBASE_ENABLED": "false"
+        "spring.liquibase.enabled": "false"
+    auditing:
+      enabled: false
+    communication:
+      enabled: true
+      liquibase: true
+      app:
+        image:
+          tag: *cxsBaseTag
+      activemq: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Developer Enablement"
+        "CONTRAST__SERVER__NAME": "auditing"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "SPRING_LIQUIBASE_ENABLED": "false"
+        "spring.liquibase.enabled": "false"
+        "spring.cloud.stream.dynamicDestinations": "false"
+        "spring.cloud.stream.default-binder": "activemq"
+        "spring.cloud.stream.bindings.push-low-priority.group": "push-group"
+        "spring.cloud.stream.bindings.push-medium-priority.group": "push-group"
+        "spring.cloud.stream.bindings.push-high-priority.group": "push-group"
+        "spring.cloud.stream.bindings.sms-low-priority.group": "sms-group"
+        "spring.cloud.stream.bindings.sms-medium-priority.group": "sms-group"
+        "spring.cloud.stream.bindings.sms-high-priority.group": "sms-group"
+        "spring.cloud.stream.bindings.email-low-priority.group": "email-group"
+        "spring.cloud.stream.bindings.email-medium-priority.group": "email-group"
+        "spring.cloud.stream.bindings.email-high-priority.group": "email-group"
+        "backbase.communication.channels.push-notification.0": "push-low-priority"
+        "backbase.communication.channels.push-notification.1-6": "push-medium-priority"
+        "backbase.communication.channels.push-notification.7": "push-high-priority"
+        "backbase.communication.channels.sms.0": "sms-low-priority"
+        "backbase.communication.channels.sms.1-6": "sms-medium-priority"
+        "backbase.communication.channels.sms.7": "sms-high-priority"
+        "backbase.communication.channels.email.0": "email-low-priority"
+        "backbase.communication.channels.email.1-6": "email-medium-priority"
+        "backbase.communication.channels.email.7": "email-high-priority"
+        "spring.cloud.stream.bindings.push-low-priority.destination": "Backbase.communication.push-low-priority"
+        "spring.cloud.stream.bindings.push-medium-priority.destination": "Backbase.communication.push-medium-priority"
+        "spring.cloud.stream.bindings.push-high-priority.destination": "Backbase.communication.push-high-priority"
+        "spring.cloud.stream.bindings.sms-low-priority.destination": "Backbase.communication.sms-low-priority"
+        "spring.cloud.stream.bindings.sms-medium-priority.destination": "Backbase.communication.sms-medium-priority"
+        "spring.cloud.stream.bindings.sms-high-priority.destination": "Backbase.communication.sms-high-priority"
+        "spring.cloud.stream.bindings.email-low-priority.destination": "Backbase.communication.email-low-priority"
+        "spring.cloud.stream.bindings.email-medium-priority.destination": "Backbase.communication.email-medium-priority"
+        "spring.cloud.stream.bindings.email-high-priority.destination": "Backbase.communication.email-high-priority"
+    remoteConfig:
+      enabled: true
+      database: true
+      liquibase: true
+      app:
+        image:
+          tag: *cxsBaseTag
+      env:
+        "CONTRAST__SERVER__TAGS": "Developer Enablement"
+        "CONTRAST__SERVER__NAME": "remoteConfig"
+        "spring.config.additional-location": "file:/config/"
+        "backbase.audit.enabled": "true"
+        "spring.autoconfigure.exclude": ""
+        "spring.cloud.features.enabled": "false"
+        "backbase.remote-config.features.configuration-drafts": "true"
+    s3StorageConnector:
+      enabled: true
+      app:
+        image:
+          tag: *s3StorageConnector
+      env:
+        "spring.autoconfigure.exclude": ""
+        AWS_REGION: eu-central-1
+        AWS_ACCESS_KEY_ID:
+          valueFrom:
+            secretKeyRef:
+              name: *s3SecretTemplate
+              key: S3_AWS_ACCESS_KEY_ID
+        AWS_SECRET_ACCESS_KEY:
+          valueFrom:
+            secretKeyRef:
+              name: *s3SecretTemplate
+              key: S3_AWS_SECRET_ACCESS_KEY
+        backbase.s3.storage.connector.endpoint: "https://s3.eu-central-1.amazonaws.com"
+        backbase.s3.storage.connector.bucket: *s3SecretTemplate
+        backbase.s3.storage.connector.encryption.keyProvider: "JceProvider"
+        backbase.s3.storage.connector.encryption.keyName: "S3ConnectorKey"
+        backbase.s3.storage.connector.encryption.wrappingAlgorithm: "AES/GCM/NoPadding"
+        backbase.s3.storage.connector.encryption.secret: "F2BCBA71339831F9EB0C037D0344AC35"
+        backbase.s3.storage.connector.encryption.algorithm: "AES"
+        backbase.s3.storage.connector.encryption.enabled: "true"
+        logging.secured.enabled: "false"
+provisioner:
+  provisioner:
+    enabled: true
+    imageRegistry: *harborStable
+    imageRepository: provisioner
+    imageTag: *engageProvisioner
+    credentialsSecretName: "identity"
+    targetUrl: http://ips-edge-edge:8080/api/provisioning
+    authUrl: http://identity-backbaseidentity:8080
+    identity:
+      enabled: true
+    foldersToScan: "init,upgrade"
+    retryMaxAttempts: 1500
+  items:
+    - name: engage-defaults
+      imageRegistry: *projectRegistry
+      imageRepository: engagements-data-retail
+      imageTag: *engageDefaults
+      pullPolicy: IfNotPresent
+dbs:
+  enabled: true
+  tag: *dbsBaseTag
+  capabilities:
+    remoteDepositCapturer:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "remoteDepositCapturer"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "management.endpoints.web.exposure.include": "*"
+          "backbase.rdc.userSource": USER_MANAGER_IDENTITY
+          "backbase.rdc.provider": ensenta
+          "backbase.rdc.ensenta.partnerId": "15069"
+          "backbase.rdc.ensenta.ssoTarget": https://webdeposit.test.ensenta.com/PartnerAPI/SingleSignon/PartnerSSORequest3.svc
+          "backbase.rdc.ensenta.depositTarget": https://webdeposit.test.ensenta.com/PartnerAPI/PartnerDepositRequest3.svc
+          "backbase.rdc.ensenta.keyStore.location": file:/tmp/keystore.jks
+          "backbase.rdc.ensenta.keyStore.password": password
+          "spring.config.additional-location": ""
+        volumeMounts:
+          - name: rdc-keystore
+            mountPath: /tmp/keystore.jks
+            subPath: keystore.jks
+        volumes:
+          - name: rdc-keystore
+            secret:
+              secretName: rdc-keystore
+    accessControl:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "accessControl"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "spring.profiles.active": "live,create,init,token"
+          "spring.liquibase.change-log": "classpath:db/changelog/db.changelog-persistence.xml"
+          "spring.jpa.show-sql": "false"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.approval.level.enabled": "true"
+          "backbase.approval.validation.enabled": "true"
+    legalEntityIntegrationService:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "legalEntityIntegrationService"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+    userManager:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "userManager"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "backbase.security.mtls.paths": "/integration-api/**"
+          "backbase.security.public.paths": "/integration-api/**"
+          "backbase.communication.services.user.profile.serviceId": "user-profile-manager"
+          "BACKBASE_USERS_IDENTITYENDPOINTSENABLED": "true"
+          "BACKBASE_USERS_IDENTITYINTEGRATIONENABLED": "true"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "backbase.users.search.excluded-legal-entities": ""
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+    userProfileManager:
+      enabled: false
+    accessGroupIntegrationService:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Identity"
+          "CONTRAST__SERVER__NAME": "accessGroupIntegrationService"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+    accountStatement:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "accountStatement"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.public.paths": "/integration-api/**"
+          "backbase.communication.services.integration.account.statement.serviceId": "account-statement-integration"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+    action:
+      enabled: false
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Customer Engagement"
+          "CONTRAST__SERVER__NAME": "action"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.actions.push.applications": "model-bank"
+          "backbase.communication.services.dbs.actions.integration.serviceId": "user-profile-manager"
+          "backbase.notification-settings.behavior": "traditional"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "backbase.communication.services.sms.integration.serviceId": "central-communication-service"
+          "backbase.communication.services.email.integration.serviceId": "central-communication-service"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+            - "-Dlog4j2.formatMsgNoLookups=true"
+    approvals:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "approvals"
+          "backbase.approvals.assignment.bounded.resources": "service.agreement"
+          "backbase.approvals.approve-without-policy.enabled": "true"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+    audit:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Developer Enablement"
+          "CONTRAST__SERVER__NAME": "audit"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_ROOT": INFO
+          "backbase.audit.emitting-events-enabled": "true"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.root=INFO"
+    billpay:
+      enabled: true
+      values:
+        liquibase: true
+        app:
+          resources:
+            memory:
+              ram: 2048
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "billpay"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.billpay.enrolment-data-service-integration.enabled": "true"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "backbase.communication.services.billpay.integration.enrolment.serviceId": "billpay-enrolment-integration-service"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "backbase.security.csrf.enabled": "false"
+    billpayIntegrationPayveris:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "billpayIntegrationPayveris"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.payveris.baseUrl": "https://test-api.regrpayverisbp.com/api/services/"
+          "backbase.payveris.clientCode": "backbase"
+          "backbase.payveris.version": "7.27"
+          "backbase.payveris.apiKey": "backbase-test.b880ad9e-9729-4da4-9d41-9ef0f65e4b9b"
+          "backbase.payveris.sso.url": "https://test.regrpayverisbp.com/pp/sso/eu/"
+          "backbase.payveris.sso.enabled": "true"
+          "backbase.payveris.connectionTimeout": "5000"
+          "backbase.payveris.readTimeout": "5000"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    cashflow:
+      enabled: false
+    employee:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "employee"
+          "backbase.employee.access-control.segmentation.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    contactManager:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "contactManager"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    limits:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "limits"
+          "backbase.limits.global.enabled": "true"
+          "backbase.limits.defaults.currency": "USD"
+          "backbase.limits.integration.retry.attempts-number": "2"
+    messages:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Customer Engagement"
+          "CONTRAST__SERVER__NAME": "messages"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "MESSAGING_PASSWORD": "password"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "backbase.events.disabled-events": "com.backbase.dbs.messages.pandp.event.spec.v4.MessageDeliveredEvent"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+    notifications:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Customer Engagement"
+          "CONTRAST__SERVER__NAME": "notifications"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    paymentOrderService:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "paymentOrderService"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "BACKBASE_PAYMENTS_INTEGRATION_USERNAME": "admin"
+          "BACKBASE_PAYMENTS_INTEGRATION_INTERNAL-USER-ID": "admin"
+          "BACKBASE_SECURITY_PUBLIC_PATHS": "/integration-api/**"
+          "backbase.payments.limits.enabled": "true"
+          "backbase.payments.approval.enabled": "false"
+          "backbase.payments.confirmation.idp-issuer": "https://identity.dev.ref.live.backbaseservices.com/auth/realms/retail"
+          "backbase.payments.types.EXTERNAL_A2A.core-bank-route-id": "payment-order-integration-service"
+          "backbase.payments.types.P2P_TRANSFER.core-bank-route-id": "payveris-p2p-integrator"
+          "backbase.communication.services.dbs.integration.external.outbound.paymentorder.serviceId": "payment-order-integration-service"
+          "SPRING_PROFILES_INCLUDE": "backbase_us_retail"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+        additionalConfig: |
+          backbase:
+            payments:
+              types:
+                INTERNAL_TRANSFER:
+                  business-function: A2A Transfer
+                  confirmation:
+                    enabled: "true"
+                EXTERNAL_A2A:
+                  business-function: A2A Transfer
+                  confirmation:
+                    enabled: "true"
+                INTRABANK_TRANSFER:
+                  business-function: A2A Transfer
+                  confirmation:
+                    enabled: "true"
+                POCKET_TRANSFER_1_TO_M:
+                  business-function: A2A Transfer
+                  validation:
+                    rules:
+                      - valid-originator-account-scheme-name-id
+                      - valid-originator-account-type-pocket
+                      - valid-counterparty-account-scheme-name-id
+                      - valid-counterparty-account-type-pocket
+                      - non-zero-transaction
+                  enrichment:
+                    enrichers:
+                      - counterparty-parent
+                POCKET_TRANSFER_1_TO_1:
+                  business-function: A2A Transfer
+                  validation:
+                    rules:
+                      - valid-originator-account-scheme-name-id
+                      - valid-originator-account-type-pocket
+                      - valid-counterparty-account-scheme-name-id
+                      - valid-counterparty-account-type-pocket
+                      - non-zero-transaction
+                POCKET_TRANSFER:
+                  business-function: A2A Transfer
+                  validation:
+                    rules:
+                      - valid-originator-account-scheme-name-id
+                      - valid-originator-account-type-pocket
+                      - valid-counterparty-account-scheme-name-id
+                      - valid-counterparty-account-type-pocket
+                      - non-zero-transaction
+                  enrichment:
+                    enrichers:
+                      - counterparty-parent
+                P2P_TRANSFER:
+                  core-bank-route-id: "payveris-p2p-integrator"
+                  business-function: P2P Transfer
+                  validation:
+                    rules:
+                      - non-zero-transaction
+                      - has-counterparty
+                      - has-counterparty-account-identification
+                      - valid-p2p-counterparty-account-identificator
+                  template-validation:
+                    rules:
+                      - non-zero-transaction
+                      - valid-p2p-counterparty-account-identificator
+        javaOpts:
+          extra:
+            - "-Dlogging.level.root=INFO"
+            - "-Dlogging.level.com.backbase=INFO"
+    paymentOrderA2a:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "paymentOrderA2a"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "backbase.communication.services.dbs.vendor.payveris.serviceId": "payveris"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.root=DEBUG"
+            - "-Dlogging.level.com.backbase=DEBUG"
+    paymentOrderOptions:
+      enabled: false
+    transactionCategoryCollector:
+      enabled: true
+      values:
+        database: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "transactionCategoryCollector"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "backbase.category.management.enabled": "true"
+          "backbase.transaction.enrichment.provider": "mock"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+    budgetPlanner:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "budgetPlanner"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    arrangementManager:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Business"
+          "CONTRAST__SERVER__NAME": "arrangementManager"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "backbase.security.public.paths": "/integration-api/**"
+          "backbase.integration.outbound.pull-latest-balance": "true"
+          "backbase.communication.services.dbs.account.integration.serviceId": "account-integration-service"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "BACKBASE_ARRANGEMENT_FILTEREDOUTPRODUCTKINDS_0": Pocket
+          "BACKBASE_ARRANGEMENT_FILTEREDOUTPRODUCTKINDS_1": "Pocket Parent"
+          "backbase.arrangement.masking.use-mask-indicator": "false"
+          "backbase.arrangement.masking.defaults.character": "*"
+          "backbase.arrangement.masking.defaults.keep": "4"
+          "backbase.arrangement.masking.defaults.behaviour": "last"
+    transactionEnricher:
+      enabled: true
+      values:
+        database: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "transactionEnricher"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "backbase.transaction.enrichment.provider": "mock"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+    transactionManager:
+      enabled: true
+      values:
+        database: true
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "transactionManager"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "LOGGING_LEVEL_COM_BACKBASE": INFO
+          "LOGGING_LEVEL_ORG_SPRINGFRAMEWORK": INFO
+          "LOGGING_LEVEL_ROOT": INFO
+          "LOGGING_LEVEL_COM_SECURITY": INFO
+          "BACKBASE_SECURITY_PUBLIC_PATHS": "/integration-api/**"
+          "backbase.communication.http.autowire-object-mapper": "true"
+          "backbase.transaction.refresh.triggers.payment.enabled": "true"
+          "backbase.transaction.refresh.pull.daysRefreshWindow": "0"
+          "backbase.transaction.csv.export.dateFormat": "MM/dd/YYYY"
+          "backbase.transaction.csv.export.fields": "BBAN,name,counterPartyAccountNumber,counterPartyName,currency,amount,creditDebitIndicator,bookingDate,type,typeGroup,reference,instructedCurrency,currencyExchangeRate,instructedAmount,description,category,checkSerialNumber"
+          "backbase.transaction.csv.export.headers": "Account number(BBAN),Account name,Counter party account number,Counter party name,Currency,Amount,Credit/debit indicator,Book date,Transaction type,Transaction group,Transaction reference,Instructed currency,currency exchange rate,Instructed amount,Description,Category,Check number"
+          "backbase.transaction.pdf.export.maxItems": "10000"
+          "backbase.transaction.domain.typeGroups": "Payment,Withdrawal,Loans,Fees,payments"
+          "backbase.communication.services.integration.transaction.external.pull.service-id": "transaction-pull-integration"
+          "backbase.pfm.common.base-currency": "USD"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+          "backbase.transaction.enrichment.enabled": "false"
+        javaOpts:
+          extra:
+            - "-Dlogging.level.com.backbase=INFO"
+    vendorPayverisService:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "vendorPayverisService"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "backbase.payveris.baseUrl": "https://test-api.regrpayverisbp.com/api/services/"
+          "backbase.payveris.clientCode": "backbase"
+          "backbase.payveris.apiKey": "backbase-test.b880ad9e-9729-4da4-9d41-9ef0f65e4b9b"
+          "backbase.payveris.sso.url": "https://test.regrpayverisbp.com/pp/sso/eu/"
+          "backbase.payveris.userCodeMapper.type": "outbound-integration"
+          "backbase.communication.services.dbs.vendor.payveris.integration.serviceId": "payveris-integration-service"
+          "SPRING_LIQUIBASE_ENABLED": "false"
+          "spring.liquibase.enabled": "false"
+    pocketTailor:
+      enabled: true
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "pocketTailor"
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "backbase.security.mtls.enabled": "false"
+          "SPRING_AUTOCONFIGURE_EXCLUDE": "org.springframework.cloud.netflix.eureka.loadbalancer.LoadBalancerEurekaAutoConfiguration"
+          "backbase.communication.services.arrangement.origination.serviceId": arrangement-integration-origination-service
+          "SPRING_JACKSON_DEFAULT_PROPERTY_INCLUSION": non_null
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "BUILDINGBLOCKS_SECURITY_CSRF_ENABLED": "false"
+          "backbase.security.csrf.enabled": "false"
+    loan:
+      enabled: true
+      values:
+        liquibase: true
+        env:
+          "spring.cloud.loadbalancer.ribbon.enabled": "false"
+          "spring.cloud.kubernetes.enabled": "true"
+          "eureka.client.enabled": "false"
+          "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+          "spring.config.additional-location": ""
+          "backbase.communication.services.dbs.loan.integration.outbound.service-id": "loan-integration-outbound-service"
+
+ce:
+  enabled: true
+  tag: *ceBaseTag
+  capabilities:
+    contentEnricher:
+      enabled: true
+      liquibase: true
+      values:
+        database:
+          enabled: true
+        env:
+          BUILDINGBLOCKS_SECURITY_CSRF_ENABLED: "false"
+          spring.config.additional-location: ""
+    engagement:
+      enabled: true
+      liquibase: true
+      values:
+        env:
+          BUILDINGBLOCKS_SECURITY_CSRF_ENABLED: "false"
+          "BACKBASE_ACTIVEMQ_SSLCONFIG": "false"
+          spring.cloud.loadbalancer.ribbon.enabled: "false"
+          backbase.engagement.provisioning.general-notification.engagement-template.allow-override-content: "true"
+    realtimeEngOrchestrator:
+      enabled: true
+      values: {}
+    userSegment:
+      enabled: false
+    engageWebApp:
+      enabled: false
+jobs:
+  retail-bootstrap-task:
+    imageTag: *retailBootstrapBaseTag
+    repository: retail-bootstrap-task
+    registry: *projectRegistry
+    env:
+      "environment.installation": *currentInstallation
+      "environment.runtime": *currentRuntime
+      "spring.cloud.config.enabled": "false"
+      "mambu.bootstrapResourcesEnabled": "true"
+      "mambu.username":
+        valueFrom:
+          secretKeyRef:
+            name: mambu-credentials
+            key: username
+      "mambu.password":
+        valueFrom:
+          secretKeyRef:
+            name: mambu-credentials
+            key: password
+      "mambu.basePath":
+        valueFrom:
+          configMapKeyRef:
+            name: mambu-env
+            key: basePath
+      "mambu.branchKey":
+        valueFrom:
+          configMapKeyRef:
+            name: mambu-env
+            key: branchKey
+      "mambu.currentAccountProductKey":
+        valueFrom:
+          configMapKeyRef:
+            name: mambu-env
+            key: currentAccountProductKey
+      "mambu.savingsAccountProductKey":
+        valueFrom:
+          configMapKeyRef:
+            name: mambu-env
+            key: savingsAccountProductKey
+      "mambu.transactionsBeneficiaryAccountKey":
+        valueFrom:
+          configMapKeyRef:
+            name: mambu-env
+            key: transactionsBeneficiaryAccountKey
+      "marqeta.bootstrapResourcesEnabled": "true"
+      "marqeta.username":
+        valueFrom:
+          secretKeyRef:
+            name: marqeta-credentials
+            key: username
+      "marqeta.password":
+        valueFrom:
+          secretKeyRef:
+            name: marqeta-credentials
+            key: password
+      "marqeta.basePath":
+        valueFrom:
+          configMapKeyRef:
+            name: marqeta-env
+            key: basePath
+      "admin.bootstrapManualStepsEnabled": "true"
+      "admin.basePath": https://identity.dev.ref.live.backbaseservices.com/auth
+      "admin.username":
+        valueFrom:
+          secretKeyRef:
+            name: identity
+            key: identity-username
+      "admin.password":
+        valueFrom:
+          secretKeyRef:
+            name: identity
+            key: identity-password
+      "admin.defaultUserPassword": Pass1234
+      "payveris.bootstrapPayverisMockEnabled": "true"
+      "payveris.payverisBasePath": http://payveris-mock:8080
+
+custom:
+  enabled: true
+  buckets:
+    engagement-template-notification:
+      bucketAccessControl: "Private"
+      EnableVersioning: "False"
+  services:
+    retail-us-web:
+      enabled: true
+      service:
+        nameOverride: "retail-us-web"
+      startupProbe:
+        enabled: false
+      readinessProbe:
+        enabled: false
+      livenessProbe:
+        enabled: false
+      app:
+        image:
+          repository: web-retail-us-portalless
+          tag: *retailUsPortallessBaseTag
+        resources:
+          memory:
+            ram: 1536
+      env:
+        "PROTOCOL": "https:"
+        "BASE_HREF": /web/
+        "PATHNAME": "/"
+        "HOSTNAME": "app.dev.ref.live.backbaseservices.com"
+        "API_ROOT": "https://app.dev.ref.live.backbaseservices.com/api/"
+        "AUTH_URL": "https://identity.dev.ref.live.backbaseservices.com/auth/"
+        "AUTH_REALM": "retail"
+        "AUTH_SCOPE": "openid"
+        "AUTH_LANDING_PAGE": "select-context"
+        "AUTH_REDIRECT_PAGE": "redirect"
+        "AUTH_CLIENT_ID": "bb-web-client"
+        "NOTIFICATION_PREFERENCES_API_MODE": "engagements"
+    remote-config-web-app:
+      enabled: true
+      database: false
+      activemq: false
+      readinessProbe:
+        enabled: false
+      livenessProbe:
+        enabled: false
+      startupProbe:
+        enabled: false
+      app:
+        image:
+          registry: *sharedRegistry
+          tag: *remoteConfigWebAppBaseTag
+      service:
+        nameOverride: "remote-config-web-app"
+      env:
+        "API_URL": /api
+        "AUTH_CLIENT_ID": bb-web-client
+        "AUTH_REALM": employee
+        "AUTH_URL": https://identity.dev.ref.live.backbaseservices.com/auth
+        "MAX_INACTIVITY_DURATION": "600"
+        "REMOTE_CONFIG_SERVICE_PATH": /remote-config
+    employee-web:
+      enabled: true
+      service:
+        nameOverride: "employee-web"
+      readinessProbe:
+        enabled: false
+      livenessProbe:
+        enabled: false
+      startupProbe:
+        enabled: false
+      app:
+        image:
+          repository: web-employee-portalless
+          tag: *employeePortallessBaseTag
+        resources:
+          memory:
+            ram: 1536
+      env:
+        "PORT": '8080'
+        "BASE_HREF": /
+        "API_ROOT": /api
+        "AUTH_URL": https://identity.dev.ref.live.backbaseservices.com/auth/
+        "AUTH_REALM": employee
+        "AUTH_SCOPE": openid
+        "AUTH_CLIENT_ID": bb-web-client
+        "RETAIL_APP_URL": https://app.dev.ref.live.backbaseservices.com/web/redirect
+    employee-essentials-web:
+      enabled: true
+      service:
+        nameOverride: "employee-essentials-web"
+      readinessProbe:
+        enabled: false
+      livenessProbe:
+        enabled: false
+      startupProbe:
+        enabled: false
+      app:
+        image:
+          repository: web-employee-essentials-portalless
+          tag: *employeeEssentialsPortallessBaseTag
+        resources:
+          memory:
+            ram: 1536
+      env:
+        "PORT": '8080'
+        "BASE_HREF": /
+        "API_ROOT": /api
+        "AUTH_URL": https://identity.dev.ref.live.backbaseservices.com/auth/
+        "AUTH_REALM": employee
+        "AUTH_SCOPE": openid
+        "AUTH_CLIENT_ID": bb-web-client
+    account-integration-service:
+      enabled: true
+      app:
+        image:
+          tag: *accountIntegrationServiceBaseTag
+          repository: account-integration-service
+        metadata:
+          public: 'true'
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "account-integration-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+    billpay-enrolment-int-service:
+      enabled: true
+      app:
+        image:
+          tag: *billpayEnrolmentIntegrationServiceBaseTag
+          repository: billpay-enrolment-integration-service
+      service:
+        nameOverride: "billpay-enrolment-integration-service"
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "billpay-enrolment-int-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchKey
+    custom-user-profile-manager:
+      enabled: true
+      app:
+        metadata:
+          public: 'true'
+        image:
+          tag: *customUserProfileManagerBaseTag
+          repository: custom-user-profile-manager
+      service:
+        nameOverride: "user-profile-manager"
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Identity"
+        "CONTRAST__SERVER__NAME": "custom-user-profile-manager"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchKey
+    transaction-pull-integration:
+      enabled: true
+      app:
+        image:
+          tag: *transactionPullIntegrationBaseTag
+          repository: transaction-pull-integration-service
+      database: false
+      javaOpts:
+        extra:
+          - "-Dlogging.level.com.backbase=INFO"
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "transaction-pull-integration"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+    event-listener-service:
+      enabled: true
+      app:
+        image:
+          tag: *eventListenerServiceBaseTag
+          repository: event-listener-service
+      database: false
+      activemq: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "event-listener-service"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "SIG_SECRET_KEY":
+          valueFrom:
+            secretKeyRef:
+              name: jwt
+              key: jwt-internal-secretkey
+      javaOpts:
+        extra:
+          - "-Dlogging.level.com.backbase=INFO"
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+    arrangement-pull-integration:
+      enabled: true
+      app:
+        image:
+          tag: *arrangementPullIntegrationServiceBaseTag
+          repository: arrangement-pull-integration-service
+      database: false
+      javaOpts:
+        extra:
+          - "-Dlogging.level.com.backbase=INFO"
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "arrangement-pull-integration"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchKey
+        "mambu.currentAccountProductKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: currentAccountProductKey
+        "mambu.savingsAccountProductKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: savingsAccountProductKey
+    account-statement-integration:
+      enabled: true
+      app:
+        image:
+          tag: *accountStatementIntegrationServiceBaseTag
+          repository: account-statement-integration-service
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "account-statement-integration"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+    cards-presentation-service:
+      enabled: true
+      service:
+        nameOverride: "cards-presentation-service"
+      app:
+        image:
+          tag: *cardPresentationServiceBaseTag
+          repository: cards-presentation-service
+        metadata:
+          public: 'true'
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "cards-presentation-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+        "marqeta.username":
+          valueFrom:
+            secretKeyRef:
+              name: marqeta-credentials
+              key: username
+        "marqeta.password":
+          valueFrom:
+            secretKeyRef:
+              name: marqeta-credentials
+              key: password
+        "marqeta.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: marqeta-env
+              key: basePath
+    le-outbound-service:
+      enabled: true
+      app:
+        image:
+          tag: *legalEntityOutboundIntegrationServiceBaseTag
+          repository: legalentity-integration-outbound-service
+      service:
+        nameOverride: "legalentity-integration-outbound-service"
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "le-outbound-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+    places-presentation-service:
+      enabled: true
+      app:
+        image:
+          tag: *placesPresentationServiceBaseTag
+          repository: places-presentation-service
+        metadata:
+          public: 'true'
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "places-presentation-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchId":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchId
+        "maps.apiKey":
+          valueFrom:
+            secretKeyRef:
+              name: maps-credentials
+              key: apiKey
+    stop-checks:
+      enabled: true
+      app:
+        image:
+          tag: *stopChecksIntegrationServiceBaseTag
+          repository: stop-checks-integration-service
+        metadata:
+          public: 'true'
+      database: true
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "stop-checks-integration-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "BACKBASE_COMMUNICATION_HTTP_ACCESS-TOKEN-URI": "http://token-converter:8080/oauth/token"
+    check-images:
+      enabled: true
+      service:
+        nameOverride: "transaction-integration-check-images"
+      app:
+        image:
+          tag: *transactionIntegrationCheckImagesBaseTag
+          repository: transaction-integration-check-images-service
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "transaction-integration-check-images-service"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "backbase.security.mtls.enabled": "false"
+    payment-integration-service:
+      enabled: true
+      service:
+        nameOverride: "payment-order-integration-service"
+      app:
+        image:
+          tag: *paymentIntegrationServiceBaseTag
+          repository: payment-integration-service
+      database: true
+      activemq: true
+      javaOpts:
+        extra:
+          - "-Dlogging.level.com.backbase=INFO"
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "payment-order-integration-service"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchKey
+        "mambu.currentAccountProductKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: currentAccountProductKey
+        "mambu.savingsAccountProductKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: savingsAccountProductKey
+        "mambu.ghostAccountId":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: ghostAccountId
+    central-communication-service:
+      enabled: true
+      app:
+        image:
+          tag: *centralCommunicationServiceBaseTag
+          repository: central-communication-service
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Identity"
+        "CONTRAST__SERVER__NAME": "central-communication-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "backbase.security.public.paths": "/service-api/v1/communications/batches"
+        "twilio.accountSid":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: accountSid
+        "twilio.authToken":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: authToken
+        "twilio.fromNumber":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: fromNumber
+        "spring.mail.username":
+          valueFrom:
+            secretKeyRef:
+              name: ref-dev-eu-central-1-email-sender-account
+              key: username
+        "spring.mail.password":
+          valueFrom:
+            secretKeyRef:
+              name: ref-dev-eu-central-1-email-sender-account
+              key: password
+        "spring.mail.host":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: host
+        "spring.mail.port":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: port
+        "spring.mail.properties.mail.transport.protocol":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: protocol
+        "spring.mail.properties.mail.smtp.auth":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: smtpAuth
+        "spring.mail.properties.mail.smtp.starttls.enable":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: starttlsEnable
+        "backbase.mail.from-address":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: fromAddress
+        "backbase.mail.from-name":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: fromName
+    transaction-signing-mock:
+      enabled: true
+      app:
+        image:
+          tag: *transactionSigningMockBaseTag
+          repository: transaction-signing-mock
+          registry: *sharedRegistry
+      database: true
+      activemq: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "transaction-signing-mock"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+    arrangement-origination:
+      enabled: true
+      service:
+        nameOverride: "arrangement-integration-origination-service"
+      app:
+        image:
+          tag: *arrangementIntegrationOriginationServiceBaseTag
+          repository: arrangement-integration-origination-service
+      javaOpts:
+        extra:
+          - "-Dlogging.level.com.backbase=INFO"
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Business"
+        "CONTRAST__SERVER__NAME": "arrangement-integration-origination-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "backbase.security.csrf.enabled": "false"
+        "backbase.security.mtls.enabled": "false"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+        "mambu.branchKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: branchKey
+        "mambu.pocketProductKey":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: pocketProductKey
+    payveris-integration-service:
+      enabled: true
+      app:
+        image:
+          tag: *payverisIntegrationServiceBaseTag
+          repository: payveris-integration-service
+      database: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "payveris-integration-service"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+    comments:
+      chartName: dbs-comments
+      serviceName: "comments"
+      enabled: true
+      activemq: true
+      database: true
+      app:
+        metadata:
+          public: 'true'
+        image:
+          tag: *commentsBaseTag
+          registry: *sharedRegistry
+          repository: comments
+      podExtraLabels: {}
+      podExtraAnnotations: {}
+      values:
+        env:
+          "CONTRAST__SERVER__TAGS": "Retail"
+          "CONTRAST__SERVER__NAME": "comments"
+          "SPRING_LIQUIBASE_ENABLED": "true"
+        enabled: true
+        database: true
+    twilio-sms-connector:
+      enabled: true
+      app:
+        image:
+          tag: *twilioSmsConnectorBaseTag
+          repository: twilio-sms-connector
+      database: false
+      activemq: true
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "spring.cloud.stream.default.content-type": "application/json"
+        "spring.cloud.stream.default.consumer.exchangeDurable": "true"
+        "spring.cloud.stream.default.consumer.concurrency": "1"
+        "spring.cloud.stream.default.consumer.prefetch": "1000"
+        "spring.cloud.stream.default.consumer.autoCommitOnError": "false"
+        "spring.cloud.stream.default.consumer.max-attempts": "5"
+        "spring.cloud.stream.default.consumer.backOffInitialInterval": "2000"
+        "spring.cloud.stream.default.consumer.backOffMaxInterval": "6000"
+        "spring.cloud.stream.default.consumer.backOffMultiplier": "2.0"
+        "spring.cloud.stream.default.consumer.default-retryable": "true"
+        "spring.cloud.stream.default-binder": "activemq"
+        "backbase.sms.worker-count": "2"
+        "spring.sleuth.function.enabled": "false"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.group": "sms-group"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.group": "sms-group"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.group": "sms-group"
+        "spring.cloud.stream.function.definition": "commLowPriority;commMediumPriority;commHighPriority;commTracking"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.destination": "Backbase.communication.sms-low-priority"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.destination": "Backbase.communication.sms-medium-priority"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.destination": "Backbase.communication.sms-high-priority"
+        "spring.cloud.stream.bindings.commTracking-out-0.destination": "Backbase.communication.messages-tracking"
+        "SIG_SECRET_KEY":
+          valueFrom:
+            secretKeyRef:
+              name: jwt
+              key: jwt-internal-secretkey
+        "twilio.accountSid":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: accountSid
+        "twilio.authToken":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: authToken
+        "twilio.fromNumber":
+          valueFrom:
+            secretKeyRef:
+              name: twilio-credential
+              key: fromNumber
+    ses-email-connector:
+      enabled: true
+      app:
+        image:
+          tag: *sesEmailConnectorBaseTag
+          repository: ses-email-connector
+      database: false
+      activemq: true
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Customer Engagement"
+        "CONTRAST__SERVER__NAME": "ses-email-connector"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "spring.cloud.stream.default.content-type": "application/json"
+        "spring.cloud.stream.default.consumer.exchangeDurable": "true"
+        "spring.cloud.stream.default.consumer.concurrency": "1"
+        "spring.cloud.stream.default.consumer.prefetch": "1000"
+        "spring.cloud.stream.default.consumer.autoCommitOnError": "false"
+        "spring.cloud.stream.default.consumer.max-attempts": "5"
+        "spring.cloud.stream.default.consumer.backOffInitialInterval": "2000"
+        "spring.cloud.stream.default.consumer.backOffMaxInterval": "6000"
+        "spring.cloud.stream.default.consumer.backOffMultiplier": "2.0"
+        "spring.cloud.stream.default.consumer.default-retryable": "true"
+        "spring.cloud.stream.function.definition": "commLowPriority;commMediumPriority;commHighPriority;commTracking"
+        "spring.cloud.stream.default-binder": "activemq"
+        "backbase.email.worker-count": "2"
+        "spring.sleuth.function.enabled": "false"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.group": "email-group"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.group": "email-group"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.group": "email-group"
+        "spring.cloud.stream.bindings.commLowPriority-in-0.destination": "Backbase.communication.email-low-priority"
+        "spring.cloud.stream.bindings.commMediumPriority-in-0.destination": "Backbase.communication.email-medium-priority"
+        "spring.cloud.stream.bindings.commHighPriority-in-0.destination": "Backbase.communication.email-high-priority"
+        "spring.cloud.stream.bindings.commTracking-out-0.destination": "Backbase.communication.messages-tracking"
+        "spring.mail.username":
+          valueFrom:
+            secretKeyRef:
+              name: ref-dev-eu-central-1-email-sender-account
+              key: username
+        "spring.mail.password":
+          valueFrom:
+            secretKeyRef:
+              name: ref-dev-eu-central-1-email-sender-account
+              key: password
+        "spring.mail.host":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: host
+        "spring.mail.port":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: port
+        "spring.mail.properties.mail.transport.protocol":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: protocol
+        "spring.mail.properties.mail.smtp.auth":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: smtpAuth
+        "spring.mail.properties.mail.smtp.starttls.enable":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: starttlsEnable
+        "backbase.mail.from-address":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: fromAddress
+        "backbase.mail.from-name":
+          valueFrom:
+            configMapKeyRef:
+              name: email-env
+              key: fromName
+    payveris-p2p-integrator:
+      enabled: true
+      app:
+        image:
+          tag: *payverisP2PIntegrationBaseTag
+          repository: payveris-p2p-integrator
+          registry: *sharedRegistry
+      database: false
+      activemq: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "payveris-p2p-integrator"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "backbase.security.mtls.enabled": "false"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
+        "backbase.communication.services.dbs.vendor.payveris.serviceId": "payveris-mock"
+    payment-synchronizer:
+      enabled: true
+      app:
+        image:
+          tag: *paymentSynchronizerBaseTag
+          repository: payment-synchronizer
+          registry: *sharedRegistry
+      database: false
+      activemq: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "payment-synchronizer"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "backbase.payments.synchronizer.payment-types.P2P_TRANSFER.core-bank-route-id": "payveris-p2p-integrator"
+        "backbase.payments.synchronizer.payment-types.P2P_TRANSFER.query-interval": "P15D"
+    payveris-mock:
+      enabled: true
+      replicaCount: 1
+      app:
+        image:
+          tag: *payverisMockBaseTag
+          repository: payveris-mock
+          registry: *sharedRegistry
+      database: true
+      activemq: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "payveris-mock"
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "spring.profiles.active": "local, dev"
+    arrangement-closure:
+      enabled: true
+      service:
+        nameOverride: arrangement-integration-closure-service
+      app:
+        image:
+          repository: arrangement-integration-closure-service
+          tag: *arrangementIntegrationClosureServiceBaseTag
+      env:
+        "CONTRAST__SERVER__TAGS": "Retail"
+        "CONTRAST__SERVER__NAME": "arrangement-integration-closure-service"
+        "mambu.username":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: username
+        "mambu.password":
+          valueFrom:
+            secretKeyRef:
+              name: mambu-credentials
+              key: password
+        "mambu.baseUrl":
+          valueFrom:
+            configMapKeyRef:
+              name: mambu-env
+              key: basePath
+    loan-integration-service:
+      enabled: true
+      service:
+        nameOverride: "loan-integration-outbound-service"
+      app:
+        image:
+          tag: *loanIntegrationOutBoundServiceBaseTag
+          repository: loan-integration-outbound-service
+      database: false
+      activemq: false
+      livenessProbe:
+        enabled: true
+      readinessProbe:
+        enabled: true
+      env:
+        "spring.cloud.loadbalancer.ribbon.enabled": "false"
+        "backbase.security.mtls.enabled": "false"
+        "spring.autoconfigure.exclude": "org.springframework.cloud.function.context.config.ContextFunctionCatalogAutoConfiguration"
+        "spring.cloud.kubernetes.enabled": "true"
+        "eureka.client.enabled": "false"
