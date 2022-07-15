@@ -64,7 +64,7 @@ stopChecksIntegrationServiceBaseTag: &stopChecksIntegrationServiceBaseTag "2022.
 transactionIntegrationCheckImagesBaseTag: &transactionIntegrationCheckImagesBaseTag "2022.06.6-0.15.0-15.1"
 transactionPullIntegrationBaseTag: &transactionPullIntegrationBaseTag  "2022.06.6-0.22.0-27.1"
 twilioSmsConnectorBaseTag: &twilioSmsConnectorBaseTag "2022.06.6-0.9.0-13.1"
-releaseProvisioningPackageVersion: &releaseProvisioningPackageVersion remote-config-11
+releaseProvisioningPackageVersion: &releaseProvisioningPackageVersion remote-config-v-9-2022-07-15-08-52-08
 
 k8s:
   replicaCount: 2
