@@ -20,6 +20,12 @@
       <version>5.10.2</version>
       <scope>test</scope>
     </dependency>
+    <!-- https://mvnrepository.com/artifact/org.apache.camel/camel-core -->
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-core</artifactId>
+      <version>4.0.5</version>
+    </dependency>
 
   </dependencies>
 </project>
